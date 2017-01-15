@@ -13,8 +13,8 @@ In its most basic form, a simple reverse proxy uses this syntax:
 proxy FROM TO
 ~~~
 
-* **FROM** is the base domain to match for the request to be proxied
-* **TO** is the destination endpoint to proxy to
+* **FROM** is the base domain to match for the request to be proxied.
+* **TO** is the destination endpoint to proxy to.
 
 However, advanced features including load balancing can be utilized with an expanded syntax:
 
@@ -26,7 +26,7 @@ proxy FROM TO... {
     health_check PATH:PORT [DURATION]
     except IGNORED_NAMES...
     spray
-    protocol [dns|https_google]
+    protocol [dns [ADDRESS...]|https_google]
 }
 ~~~
 
@@ -37,9 +37,9 @@ proxy FROM TO... {
 * `max_fails` is the number of failures within fail_timeout that are needed before considering a backend to be down. If 0, the backend will never be marked as down. Default is 1.
 * `health_check` will check path (on port) on each backend. If a backend returns a status code of 200-399, then that backend is healthy. If it doesn't, the backend is marked as unhealthy for duration and no requests are routed to it. If this option is not provided then health checks are disabled. The default duration is 10 seconds ("10s").
 * `ignored_names...` is a space-separated list of paths to exclude from proxying. Requests that match any of these paths will be passed through.
-* `spray` when all backends are unhealthy, randomly pick one to send the traffic to. (This is a failsafe.)
 * `protocol` specifies what protocol to use to speak to an upstream, `dns` (the default) is plain old DNS, and
-  `https_google` uses `https://dns.google.com` and speaks a JSON DNS dialect.
+  `https_google` uses `https://dns.google.com` and speaks a JSON DNS dialect. Note when using this
+  **TO** must be `dns.google.com`.
 
 ## Policies
 
@@ -55,6 +55,35 @@ available. This is to preeempt the case where the healthchecking (as a mechanism
 
 Currently supported are `dns` (i.e., standard DNS over UDP) and `https_google`. Note that with
 `https_google` the entire transport is encrypted. Only *you* and *Google* can see your DNS activity.
+
+### dns
+
+### https_google
+
+This proxy uses `dns.google.com`, but that name obviously needs resolving into an address
+to be useful. The proxy middleware uses Google Public DNS (8.8.8.8 and 8.8.4.4) to re-resolve this
+name every 30 seconds.
+
+#### Debug queries
+
+Debug queries are enabled by default and currently there is no way to turn them off. When CoreDNS
+receives a debug queries (i.e. the name is prefixed with `o-o.debug.` a TXT record with Comment from
+`dns.google.com` is added. Note this is not always set, but sometimes you'll see:
+
+`dig @localhost -p 1053 mx o-o.debug.example.org`:
+
+~~~ txt
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+;; QUESTION SECTION:
+;o-o.debug.example.org.		IN	MX
+
+;; AUTHORITY SECTION:
+example.org.		1799	IN	SOA	sns.dns.icann.org. noc.dns.icann.org. 2016110711 7200 3600 1209600 3600
+
+;; ADDITIONAL SECTION:
+.			0	CH	TXT	"Response from 199.43.133.53"
+~~~
 
 ## Metrics
 
@@ -110,5 +139,22 @@ Proxy everything except example.org using the host resolv.conf nameservers:
 ~~~
 proxy . /etc/resolv.conf {
 	except miek.nl example.org
+}
+~~~
+
+Proxy all requests within example.org to Google's dns.google.com.
+
+~~~
+proxy example.org dns.google.com {
+    encoding https_google
+}
+~~~
+
+Proxy everything, and re-lookup `dns.google.com` every 30 seconds using the resolvers specified
+in /etc/resolv.conf.
+
+~~~
+proxy . dns.google.com {
+    encoding https_google /etc/resolv.conf
 }
 ~~~
