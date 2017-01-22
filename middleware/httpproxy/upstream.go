@@ -60,7 +60,6 @@ func newSimpleUpstream(hosts []string) (*simpleUpstream, error) {
 }
 
 func (u *simpleUpstream) From() string                   { return u.from }
-func (u *simpleUpstream) Options() proxy.Options         { return proxy.Options{} }
 func (u *simpleUpstream) IsAllowedPath(name string) bool { return true }
 
 func (u *simpleUpstream) Select() *proxy.UpstreamHost {

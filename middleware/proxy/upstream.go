@@ -37,13 +37,7 @@ type staticUpstream struct {
 	}
 	WithoutPathPrefix string
 	IgnoredSubDomains []string
-	options           Options
 	Protocol          protocol
-}
-
-// Options ...
-type Options struct {
-	Ecs []*net.IPNet // EDNS0 CLIENT SUBNET address (v4/v6) to add in CIDR notaton.
 }
 
 // NewStaticUpstreams parses the configuration input and sets up
@@ -89,7 +83,7 @@ func NewStaticUpstreams(c *caddyfile.Dispenser) ([]Upstream, error) {
 				Fails:       0,
 				FailTimeout: upstream.FailTimeout,
 				Unhealthy:   false,
-				Exchanger:   newDNSEx(host),
+				Exchanger:   newDNSEx(),
 
 				CheckDown: func(upstream *staticUpstream) UpstreamHostDownFunc {
 					return func(uh *UpstreamHost) bool {
@@ -107,7 +101,8 @@ func NewStaticUpstreams(c *caddyfile.Dispenser) ([]Upstream, error) {
 				WithoutPathPrefix: upstream.WithoutPathPrefix,
 			}
 			switch upstream.Protocol {
-			// case https_google:
+			//			case https_googleProto:
+			//bootstrap, _ := newStaticBootstrapUpstream([]string{"8.8.8.8:53", "8.8.4.4:53"})
 
 			case dnsProto:
 				fallthrough
@@ -133,10 +128,6 @@ func RegisterPolicy(name string, policy func() Policy) {
 
 func (u *staticUpstream) From() string {
 	return u.from
-}
-
-func (u *staticUpstream) Options() Options {
-	return u.options
 }
 
 func parseBlock(c *caddyfile.Dispenser, u *staticUpstream) error {
@@ -304,4 +295,46 @@ func (u *staticUpstream) IsAllowedPath(name string) bool {
 		}
 	}
 	return true
+}
+
+// newUpstream returns an upstream initialized with hosts.
+func newUpstream(hosts []string) Upstream {
+	upstream := &staticUpstream{
+		from:        "",
+		Hosts:       nil,
+		Policy:      &Random{},
+		Spray:       nil,
+		FailTimeout: 10 * time.Second,
+		MaxFails:    3,
+		Protocol:    dnsProto,
+	}
+
+	upstream.Hosts = make([]*UpstreamHost, len(hosts))
+	for _, h := range hosts {
+		uh := &UpstreamHost{
+			Name:        h,
+			Conns:       0,
+			Fails:       0,
+			FailTimeout: upstream.FailTimeout,
+			Unhealthy:   false,
+			Exchanger:   newDNSEx(),
+
+			CheckDown: func(upstream *staticUpstream) UpstreamHostDownFunc {
+				return func(uh *UpstreamHost) bool {
+					if uh.Unhealthy {
+						return true
+					}
+
+					fails := atomic.LoadInt32(&uh.Fails)
+					if fails >= upstream.MaxFails && upstream.MaxFails != 0 {
+						return true
+					}
+					return false
+				}
+			}(upstream),
+			WithoutPathPrefix: upstream.WithoutPathPrefix,
+		}
+		upstream.Hosts = append(upstream.Hosts, uh)
+	}
+	return upstream
 }

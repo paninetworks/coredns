@@ -24,6 +24,9 @@ type Proxy struct {
 	Upstreams []Upstream
 }
 
+// ProxyUpdateFunc updates the proxy. It primary use is to update the upstreams.
+type ProxyUpdateFunc func(*Proxy) bool
+
 // Upstream manages a pool of proxy upstream hosts. Select should return a
 // suitable upstream host, or nil if no such hosts are available.
 type Upstream interface {
@@ -33,8 +36,6 @@ type Upstream interface {
 	Select() *UpstreamHost
 	// Checks if subpdomain is not an ignored.
 	IsAllowedPath(string) bool
-	// Options returns the options set for this upstream
-	Options() Options
 }
 
 // UpstreamHostDownFunc can be used to customize how Down behaves.
@@ -69,7 +70,7 @@ func (uh *UpstreamHost) Down() bool {
 var tryDuration = 60 * time.Second
 
 // ServeDNS satisfies the middleware.Handler interface.
-func (p Proxy) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+func (p *Proxy) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
 	for _, upstream := range p.Upstreams {
 		start := time.Now()
@@ -87,7 +88,7 @@ func (p Proxy) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (
 
 			atomic.AddInt64(&host.Conns, 1)
 
-			reply, backendErr := host.Exchange(state)
+			reply, backendErr := host.Exchange(host.Name, state)
 
 			atomic.AddInt64(&host.Conns, -1)
 

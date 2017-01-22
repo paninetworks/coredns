@@ -12,23 +12,18 @@ import (
 
 type dnsEx struct {
 	Timeout time.Duration
-	Address string // address/name of this upstream
-
-	group *singleflight.Group
+	group   *singleflight.Group
 }
 
-func newDNSEx(address string) *dnsEx {
-	return &dnsEx{Address: address, group: new(singleflight.Group), Timeout: defaultTimeout * time.Second}
+func newDNSEx() *dnsEx {
+	return &dnsEx{group: new(singleflight.Group), Timeout: defaultTimeout * time.Second}
 }
 
-func (d *dnsEx) OnStartup() error             { return nil }
-func (d *dnsEx) OnShutdown() error            { return nil }
-func (d *dnsEx) SetUpstream(u Upstream) error { return nil }
-func (d *dnsEx) Protocol() protocol           { return dnsProto }
+func (d *dnsEx) Protocol() protocol { return dnsProto }
 
 // Exchange implements the Exchanger interface.
-func (d *dnsEx) Exchange(state request.Request) (*dns.Msg, error) {
-	co, err := net.DialTimeout(state.Proto(), d.Address, d.Timeout)
+func (d *dnsEx) Exchange(upstreamAddr string, state request.Request) (*dns.Msg, error) {
+	co, err := net.DialTimeout(state.Proto(), upstreamAddr, d.Timeout)
 	if err != nil {
 		return nil, err
 	}

@@ -31,7 +31,7 @@ func NewLookup(hosts []string) Proxy {
 			Conns:       0,
 			Fails:       0,
 			FailTimeout: upstream.FailTimeout,
-			Exchanger:   newDNSEx(host),
+			Exchanger:   newDNSEx(),
 
 			Unhealthy: false,
 			CheckDown: func(upstream *staticUpstream) UpstreamHostDownFunc {
@@ -88,7 +88,7 @@ func (p Proxy) lookup(state request.Request) (*dns.Msg, error) {
 
 			atomic.AddInt64(&host.Conns, 1)
 
-			reply, backendErr := host.Exchange(state)
+			reply, backendErr := host.Exchange(host.Name, state)
 
 			atomic.AddInt64(&host.Conns, -1)
 

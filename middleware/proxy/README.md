@@ -26,7 +26,7 @@ proxy FROM TO... {
     health_check PATH:PORT [DURATION]
     except IGNORED_NAMES...
     spray
-    protocol [dns [ADDRESS...]|https_google]
+    protocol [dns|https_google [bootstrap ADDRESS...]]
 }
 ~~~
 
@@ -53,24 +53,18 @@ available. This is to preeempt the case where the healthchecking (as a mechanism
 
 ## Upstream Protocols
 
-Currently supported are `dns` (i.e., standard DNS over UDP) and `https_google`. Note that with
+Currently `protocol` supports `dns` (i.e., standard DNS over UDP/TCP) and `https_google`. Note that with
 `https_google` the entire transport is encrypted. Only *you* and *Google* can see your DNS activity.
 
-### dns
+* `dns`: no options can be given at the moment.
+* `https_google`: bootstrap **ADDRESS** is used to resolve `dns.google.com` to an address to
+  connect to. This happens every 30s. If not specified the default is used: 8.8.8.8/8.8.4.4.
 
-### https_google
+  Debug queries are enabled by default and currently there is no way to turn them off. When CoreDNS
+  receives a debug queries (i.e. the name is prefixed with `o-o.debug.` a TXT record with Comment
+  from `dns.google.com` is added. Note this is not always set, but sometimes you'll see:
 
-This proxy uses `dns.google.com`, but that name obviously needs resolving into an address
-to be useful. The proxy middleware uses Google Public DNS (8.8.8.8 and 8.8.4.4) to re-resolve this
-name every 30 seconds.
-
-#### Debug queries
-
-Debug queries are enabled by default and currently there is no way to turn them off. When CoreDNS
-receives a debug queries (i.e. the name is prefixed with `o-o.debug.` a TXT record with Comment from
-`dns.google.com` is added. Note this is not always set, but sometimes you'll see:
-
-`dig @localhost -p 1053 mx o-o.debug.example.org`:
+  `dig @localhost -p 1053 mx o-o.debug.example.org`:
 
 ~~~ txt
 ;; OPT PSEUDOSECTION:
