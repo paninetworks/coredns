@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -17,21 +18,23 @@ import (
 	"github.com/miekg/dns"
 )
 
-// immediate retries until this duration ends or we get a nil host.
-var tryDuration = 60 * time.Second
-
 type google struct {
-	client    *http.Client
-	endpoint  string
-	bootstrap Upstream
-	quit      chan bool
+	client   *http.Client
+	endpoint string
+	boot     Upstream
+	quit     chan bool
 }
 
-func newGoogle(host string) *google {
-	if host == "" {
-		host = ghost
+func newGoogle(endpoint string) *google {
+	if endpoint == "" {
+		endpoint = ghost
 	}
-	return &google{client: newClient(dns.Fqdn(host)), endpoint: dns.Fqdn(host), quit: make(chan bool)}
+	tls := &tls.Config{ServerName: endpoint}
+	client := &http.Client{
+		Timeout:   time.Second * defaultTimeout,
+		Transport: &http.Transport{TLSClientConfig: tls},
+	}
+	return &google{client: client, endpoint: dns.Fqdn(endpoint), quit: make(chan bool)}
 }
 
 func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) {
@@ -46,7 +49,7 @@ func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) 
 		v.Set("name", bug)
 	}
 
-	buf, backendErr := g.exchange(addr.Name, v.Encode())
+	buf, backendErr := g.exchange(addr, v.Encode())
 
 	if backendErr == nil {
 		gm := new(googleMsg)
@@ -71,7 +74,7 @@ func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) 
 		return m, nil
 	}
 
-	log.Printf("[WARNING] Failed to connect to HTTPS backend %q: %s", g.host, backendErr)
+	log.Printf("[WARNING] Failed to connect to HTTPS backend %q: %s", g.endpoint, backendErr)
 	return nil, backendErr
 }
 
@@ -197,89 +200,6 @@ func (g *google) bootstrap(r *dns.Msg) ([]string, error) {
 		}(host, timeout)
 	}
 	return nil, fmt.Errorf("no healthy upstream hosts")
-}
-
-// toMsg converts a googleMsg into the dns message. The returned RR is the comment disquised as a TXT
-// record.
-func toMsg(g *googleMsg) (*dns.Msg, dns.RR, error) {
-	m := new(dns.Msg)
-	m.Response = true
-	m.Rcode = g.Status
-	m.Truncated = g.TC
-	m.RecursionDesired = g.RD
-	m.RecursionAvailable = g.RA
-	m.AuthenticatedData = g.AD
-	m.CheckingDisabled = g.CD
-
-	m.Question = make([]dns.Question, 1)
-	m.Answer = make([]dns.RR, len(g.Answer))
-	m.Ns = make([]dns.RR, len(g.Authority))
-	m.Extra = make([]dns.RR, len(g.Additional))
-
-	m.Question[0] = dns.Question{Name: g.Question[0].Name, Qtype: g.Question[0].Type, Qclass: dns.ClassINET}
-
-	var err error
-	for i := 0; i < len(m.Answer); i++ {
-		m.Answer[i], err = toRR(g.Answer[i])
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	for i := 0; i < len(m.Ns); i++ {
-		m.Ns[i], err = toRR(g.Authority[i])
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	for i := 0; i < len(m.Extra); i++ {
-		m.Extra[i], err = toRR(g.Additional[i])
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	txt, _ := dns.NewRR(". 0 CH TXT " + g.Comment)
-	return m, txt, nil
-}
-
-func toRR(g googleRR) (dns.RR, error) {
-	typ, ok := dns.TypeToString[g.Type]
-	if !ok {
-		return nil, fmt.Errorf("failed to convert type %q", g.Type)
-	}
-
-	str := fmt.Sprintf("%s %d %s %s", g.Name, g.TTL, typ, g.Data)
-	rr, err := dns.NewRR(str)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse %q: %s", str, err)
-	}
-	return rr, nil
-}
-
-// googleRR represents a dns.RR in another form.
-type googleRR struct {
-	Name string
-	Type uint16
-	TTL  uint32
-	Data string
-}
-
-// googleMsg is a JSON representation of the dns.Msg.
-type googleMsg struct {
-	Status   int
-	TC       bool
-	RD       bool
-	RA       bool
-	AD       bool
-	CD       bool
-	Question []struct {
-		Name string
-		Type uint16
-	}
-	Answer     []googleRR
-	Authority  []googleRR
-	Additional []googleRR
-	Comment    string
 }
 
 const (
