@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -19,10 +20,10 @@ import (
 type google struct {
 	client *http.Client
 
-	endpoint string // Name to resolve via 'boot'
+	endpoint string // Name to resolve via 'bootstrapProxy'
 
-	boot Upstream
-	quit chan bool
+	bootstrapProxy Proxy
+	quit           chan bool
 }
 
 func newGoogle(endpoint string, bootstrap []string) *google {
@@ -37,7 +38,7 @@ func newGoogle(endpoint string, bootstrap []string) *google {
 
 	boot := NewLookup(bootstrap)
 
-	return &google{client: client, endpoint: dns.Fqdn(endpoint), boot: boot, quit: make(chan bool)}
+	return &google{client: client, endpoint: dns.Fqdn(endpoint), bootstrapProxy: boot, quit: make(chan bool)}
 }
 
 func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) {
@@ -114,17 +115,20 @@ func (g *google) OnShutdown(p *Proxy) error {
 }
 
 func (g *google) OnStartup(p *Proxy) error {
+	state := request.Request{W: nil, Req: nil} // TODO(miek): might blow up
 
-	r := new(dns.Msg)
-	r.SetQuestion(g.endpoint, dns.TypeA)
-
-	new, err := g.bootstrap(p, r)
+	new, err := g.bootstrapProxy.Lookup(state, g.endpoint, dns.TypeA)
+	// ignore errors here, as we want to keep on trying.
 	if err != nil {
-		return err
+		log.Printf("[WARNING] Failed to bootstrap A records %q: %s", g.endpoint, err)
+	} else {
+		addrs, err1 := extractAnswer(new)
+		if err1 != nil {
+			log.Printf("[WARNING] Failed to bootstrap A records %q: %s", g.endpoint, err)
+		}
+		up := newUpstream(addrs)
+		p.Upstreams = &[]Upstream{up}
 	}
-
-	up := newUpstream(new)
-	p.Upstreams = &[]Upstream{up}
 
 	go func() {
 		tick := time.NewTicker(300 * time.Second)
@@ -133,15 +137,19 @@ func (g *google) OnStartup(p *Proxy) error {
 			select {
 			case <-tick.C:
 
-				r.SetQuestion(g.endpoint, dns.TypeA)
-				new, err := g.bootstrap(p, r)
+				new, err := g.bootstrapProxy.Lookup(state, g.endpoint, dns.TypeA)
 				if err != nil {
 					log.Printf("[WARNING] Failed to bootstrap A records %q: %s", g.endpoint, err)
-					continue
+				} else {
+					addrs, err1 := extractAnswer(new)
+					if err1 != nil {
+						log.Printf("[WARNING] Failed to bootstrap A records %q: %s", g.endpoint, err)
+						continue
+					}
+					up := newUpstream(addrs)
+					p.Upstreams = &[]Upstream{up}
 				}
 
-				up := newUpstream(new)
-				p.Upstreams = &[]Upstream{up}
 			case <-g.quit:
 				return
 			}
@@ -151,7 +159,25 @@ func (g *google) OnStartup(p *Proxy) error {
 	return nil
 }
 
+func extractAnswer(m *dns.Msg) ([]string, error) {
+	if len(m.Answer) == 0 {
+		return nil, fmt.Errorf("no answer section in response")
+	}
+	ret := []string{}
+	for _, an := range m.Answer {
+		if a, ok := an.(*dns.A); ok {
+			ret = append(ret, net.JoinHostPort(a.A.String(), "443"))
+		}
+	}
+	if len(ret) > 0 {
+		return ret, nil
+	}
+
+	return nil, fmt.Errorf("no address records in answer section")
+}
+
 const (
 	// Default endpoint for this service.
-	ghost = "dns.google.com."
+	ghost                     = "dns.google.com."
+	httpsGoogleProto protocol = "https_google"
 )

@@ -19,8 +19,8 @@ var (
 	}, []string{"protocol", "zone"})
 )
 
-// OnStartup sets up the metrics on startup. This is done for all proxy protocols.
-func OnStartup() error {
+// OnStartupMetrics sets up the metrics on startup. This is done for all proxy protocols.
+func OnStartupMetrics() error {
 	metricsOnce.Do(func() {
 		prometheus.MustRegister(RequestDuration)
 	})

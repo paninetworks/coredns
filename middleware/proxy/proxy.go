@@ -28,9 +28,6 @@ type Proxy struct {
 	Upstreams *[]Upstream
 }
 
-// ProxyUpdateFunc updates the proxy. It primary use is to update the upstreams.
-type ProxyUpdateFunc func(*Proxy) bool
-
 // Upstream manages a pool of proxy upstream hosts. Select should return a
 // suitable upstream host, or nil if no such hosts are available.
 type Upstream interface {
