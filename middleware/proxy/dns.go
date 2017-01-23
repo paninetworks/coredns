@@ -19,7 +19,9 @@ func newDNSEx() *dnsEx {
 	return &dnsEx{group: new(singleflight.Group), Timeout: defaultTimeout * time.Second}
 }
 
-func (d *dnsEx) Protocol() protocol { return dnsProto }
+func (d *dnsEx) Protocol() protocol        { return dnsProto }
+func (d *dnsEx) OnShutdown(p *Proxy) error { return nil }
+func (d *dnsEx) OnStartup(p *Proxy) error  { return nil }
 
 // Exchange implements the Exchanger interface.
 func (d *dnsEx) Exchange(addr string, state request.Request) (*dns.Msg, error) {

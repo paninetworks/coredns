@@ -20,8 +20,12 @@ var (
 
 // Proxy represents a middleware instance that can proxy requests to another (DNS) server.
 type Proxy struct {
-	Next      middleware.Handler
-	Upstreams []Upstream
+	Next middleware.Handler
+
+	// Upstreams is a pointer to a slice, so we can update the upstream (used for Google)
+	// midway.
+
+	Upstreams *[]Upstream
 }
 
 // ProxyUpdateFunc updates the proxy. It primary use is to update the upstreams.
@@ -72,7 +76,7 @@ var tryDuration = 60 * time.Second
 // ServeDNS satisfies the middleware.Handler interface.
 func (p *Proxy) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
-	for _, upstream := range p.Upstreams {
+	for _, upstream := range *p.Upstreams {
 		start := time.Now()
 
 		// Since Select() should give us "up" hosts, keep retrying

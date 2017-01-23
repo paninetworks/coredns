@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
-	"sync/atomic"
 	"time"
 
 	"github.com/miekg/coredns/middleware/pkg/debug"
@@ -19,13 +17,15 @@ import (
 )
 
 type google struct {
-	client   *http.Client
-	endpoint string
-	boot     Upstream
-	quit     chan bool
+	client *http.Client
+
+	endpoint string // Name to resolve via 'boot'
+
+	boot Upstream
+	quit chan bool
 }
 
-func newGoogle(endpoint string) *google {
+func newGoogle(endpoint string, bootstrap []string) *google {
 	if endpoint == "" {
 		endpoint = ghost
 	}
@@ -34,7 +34,10 @@ func newGoogle(endpoint string) *google {
 		Timeout:   time.Second * defaultTimeout,
 		Transport: &http.Transport{TLSClientConfig: tls},
 	}
-	return &google{client: client, endpoint: dns.Fqdn(endpoint), quit: make(chan bool)}
+
+	boot := NewLookup(bootstrap)
+
+	return &google{client: client, endpoint: dns.Fqdn(endpoint), boot: boot, quit: make(chan bool)}
 }
 
 func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) {
@@ -49,7 +52,7 @@ func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) 
 		v.Set("name", bug)
 	}
 
-	buf, backendErr := g.exchange(addr, v.Encode())
+	buf, backendErr := g.exchangeJSON(addr, v.Encode())
 
 	if backendErr == nil {
 		gm := new(googleMsg)
@@ -78,48 +81,7 @@ func (g *google) Exchange(addr string, state request.Request) (*dns.Msg, error) 
 	return nil, backendErr
 }
 
-// OnStartup looks up the IP address for endpoint every 300 seconds.
-func (g *google) OnStartup() error {
-	r := new(dns.Msg)
-	r.SetQuestion(g.endpoint, dns.TypeA)
-	new, err := g.bootstrap(r)
-	if err != nil {
-		return err
-	}
-
-	up, _ := newSimpleUpstream(new)
-	g.Lock()
-	g.addr = up
-	g.Unlock()
-
-	go func() {
-		tick := time.NewTicker(300 * time.Second)
-
-		for {
-			select {
-			case <-tick.C:
-
-				r.SetQuestion(g.endpoint, dns.TypeA)
-				new, err := g.bootstrap(r)
-				if err != nil {
-					log.Printf("[WARNING] Failed to bootstrap A records %q: %s", g.endpoint, err)
-					continue
-				}
-
-				up, _ := newSimpleUpstream(new)
-				g.Lock()
-				g.addr = up
-				g.Unlock()
-			case <-g.quit:
-				return
-			}
-		}
-	}()
-
-	return nil
-}
-
-func (g *google) exchange(addr, json string) ([]byte, error) {
+func (g *google) exchangeJSON(addr, json string) ([]byte, error) {
 	url := "https://" + addr + "/resolve?" + json
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -146,60 +108,47 @@ func (g *google) exchange(addr, json string) ([]byte, error) {
 	return buf, nil
 }
 
-func (g *google) OnShutdown() error {
+func (g *google) OnShutdown(p *Proxy) error {
 	g.quit <- true
 	return nil
 }
 
-func (g *google) SetUpstream(u *simpleUpstream) error {
-	g.upstream = u
-	return nil
-}
+func (g *google) OnStartup(p *Proxy) error {
 
-func (g *google) bootstrap(r *dns.Msg) ([]string, error) {
-	c := new(dns.Client)
-	start := time.Now()
+	r := new(dns.Msg)
+	r.SetQuestion(g.endpoint, dns.TypeA)
 
-	for time.Now().Sub(start) < tryDuration {
-		host := g.upstream.Select()
-		if host == nil {
-			return nil, fmt.Errorf("no healthy upstream hosts")
-		}
-
-		atomic.AddInt64(&host.Conns, 1)
-
-		m, _, backendErr := c.Exchange(r, host.Name)
-
-		atomic.AddInt64(&host.Conns, -1)
-
-		if backendErr == nil {
-			if len(m.Answer) == 0 {
-				return nil, fmt.Errorf("no answer section in response")
-			}
-			ret := []string{}
-			for _, an := range m.Answer {
-				if a, ok := an.(*dns.A); ok {
-					ret = append(ret, net.JoinHostPort(a.A.String(), "443"))
-				}
-			}
-			if len(ret) > 0 {
-				return ret, nil
-			}
-
-			return nil, fmt.Errorf("no address records in answer section")
-		}
-
-		timeout := host.FailTimeout
-		if timeout == 0 {
-			timeout = 7 * time.Second
-		}
-		atomic.AddInt32(&host.Fails, 1)
-		go func(host *UpstreamHost, timeout time.Duration) {
-			time.Sleep(timeout)
-			atomic.AddInt32(&host.Fails, -1)
-		}(host, timeout)
+	new, err := g.bootstrap(p, r)
+	if err != nil {
+		return err
 	}
-	return nil, fmt.Errorf("no healthy upstream hosts")
+
+	up := newUpstream(new)
+	p.Upstreams = &[]Upstream{up}
+
+	go func() {
+		tick := time.NewTicker(300 * time.Second)
+
+		for {
+			select {
+			case <-tick.C:
+
+				r.SetQuestion(g.endpoint, dns.TypeA)
+				new, err := g.bootstrap(p, r)
+				if err != nil {
+					log.Printf("[WARNING] Failed to bootstrap A records %q: %s", g.endpoint, err)
+					continue
+				}
+
+				up := newUpstream(new)
+				p.Upstreams = &[]Upstream{up}
+			case <-g.quit:
+				return
+			}
+		}
+	}()
+
+	return nil
 }
 
 const (

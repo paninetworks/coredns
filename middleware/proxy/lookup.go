@@ -50,7 +50,7 @@ func NewLookup(hosts []string) Proxy {
 		}
 		upstream.Hosts[i] = uh
 	}
-	p.Upstreams = []Upstream{upstream}
+	p.Upstreams = &[]Upstream{upstream}
 	return p
 }
 
@@ -72,7 +72,7 @@ func (p Proxy) Forward(state request.Request) (*dns.Msg, error) {
 }
 
 func (p Proxy) lookup(state request.Request) (*dns.Msg, error) {
-	for _, upstream := range p.Upstreams {
+	for _, upstream := range *p.Upstreams {
 		start := time.Now()
 
 		// Since Select() should give us "up" hosts, keep retrying
