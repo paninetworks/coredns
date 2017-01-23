@@ -100,15 +100,7 @@ func NewStaticUpstreams(c *caddyfile.Dispenser) ([]Upstream, error) {
 				}(upstream),
 				WithoutPathPrefix: upstream.WithoutPathPrefix,
 			}
-			switch upstream.Protocol {
-			//			case https_googleProto:
 			//bootstrap, _ := newStaticBootstrapUpstream([]string{"8.8.8.8:53", "8.8.4.4:53"})
-
-			case dnsProto:
-				fallthrough
-			default:
-				// Already done in the initialization above.
-			}
 
 			upstream.Hosts[i] = uh
 		}
@@ -201,7 +193,8 @@ func parseBlock(c *caddyfile.Dispenser, u *staticUpstream) error {
 		case "dns":
 			u.Protocol = dnsProto
 		case "https_google":
-			// Nothing yet.
+			u.Protocol = httpsGoogleProto
+			// parse optional bootstrap
 		default:
 			return fmt.Errorf("%s: %s", errInvalidProtocol, encArgs[0])
 		}
