@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"github.com/miekg/coredns/request"
-
 	"github.com/miekg/dns"
 )
 
@@ -11,6 +10,9 @@ import (
 type Exchanger interface {
 	Exchange(string, request.Request) (*dns.Msg, error)
 	Protocol() protocol
+
+	OnStartup(*Proxy) error
+	OnShutdown(*Proxy) error
 }
 
 type protocol string

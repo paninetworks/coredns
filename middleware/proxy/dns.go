@@ -22,8 +22,8 @@ func newDNSEx() *dnsEx {
 func (d *dnsEx) Protocol() protocol { return dnsProto }
 
 // Exchange implements the Exchanger interface.
-func (d *dnsEx) Exchange(upstreamAddr string, state request.Request) (*dns.Msg, error) {
-	co, err := net.DialTimeout(state.Proto(), upstreamAddr, d.Timeout)
+func (d *dnsEx) Exchange(addr string, state request.Request) (*dns.Msg, error) {
+	co, err := net.DialTimeout(state.Proto(), addr, d.Timeout)
 	if err != nil {
 		return nil, err
 	}
